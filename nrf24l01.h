@@ -61,7 +61,7 @@ struct nrf24l01_reg_read_addr {
 	uint8_t value[5];
 };
 
-/* NRF24L01 registers */
+/* NRF24L01 registers in ascending order by address */
 struct nrf24l01_registers {
 	struct nrf24l01_reg_read	config;
 	struct nrf24l01_reg_read	en_aa;
@@ -118,6 +118,8 @@ ssize_t nrf24l01_sysfs_status_show(struct device *dev,
 	struct device_attribute *attr, char *buff);
 ssize_t nrf24l01_sysfs_status_store(struct device *dev,
 	struct device_attribute *attr, const char *buff, size_t count);
+ssize_t nrf24l01_sysfs_reg_map_show(struct device *dev,
+	struct device_attribute *attr, char *buff);
 int nrf24l01_open(struct inode *inode, struct file *filp);
 int nrf24l01_release(struct inode *inode, struct file *filp);
 ssize_t nrf24l01_read(struct file *filp, char __user *ubuff,

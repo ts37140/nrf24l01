@@ -31,6 +31,9 @@
 
 #define NRF24L01_REG_WRITE_MASK	(0x20)
 
+/* nRF24L01 registers */
+#define NRF24L01_REG_NUM		26
+
 #define NRF24L01_REG_CONFIG		0x00
 #define NRF24L01_REG_EN_AA		0x01
 #define NRF24L01_REG_EN_RXADDR		0x02
@@ -61,6 +64,98 @@
 
 /* selftest value which is written to config register */
 #define NRF24L01_SELFTEST_CONFIG	0x7D
+
+static int nrf24l01_spi_read_reg_map(struct spi_device *spi)
+{
+	int res = -EPERM;
+	struct priv_data *priv = spi_get_drvdata(spi);
+	uint8_t *tx_buf = NULL;
+	uint8_t *rx_buf = NULL;
+	struct spi_transfer *spi_xfer = NULL;
+	struct spi_message m;
+	unsigned int xfer_idx = 0;
+	unsigned int buf_idx = 0;
+
+	PINFO(priv->dev, "\n");
+
+	spi_xfer = devm_kzalloc(priv->dev,
+		NRF24L01_REG_NUM * sizeof(struct spi_transfer), GFP_KERNEL);
+	if (!spi_xfer) {
+		PERR(priv->dev, "out of memory\n");
+		res = -ENOMEM;
+		goto out;
+	}
+
+	/* Private-data register map can be directly used
+	 * as a rx-buffer.
+	 */
+	rx_buf = (uint8_t *)&priv->spi_ops.reg_map;
+
+	tx_buf = devm_kzalloc(priv->dev,
+		sizeof(struct nrf24l01_registers), GFP_KERNEL);
+	if (!tx_buf) {
+		PERR(priv->dev, "out of memory\n");
+		res = -ENOMEM;
+		goto out;
+	}
+
+	/* Chip registers address starts from 0x0 and is incremented
+	 * by 1 byte for each subsequent register.
+	 *
+	 * Register reading starts by writing register address to the chip
+	 */
+	for (xfer_idx = 0; xfer_idx < NRF24L01_REG_NUM; xfer_idx++) {
+		/* Set register address. Register map has a hole
+		 * before 2 last registers
+		 */
+		switch (xfer_idx) {
+		case (NRF24L01_REG_FIFO_STAT + 1):
+			tx_buf[buf_idx] = NRF24L01_REG_DYNPD;
+			break;
+		case (NRF24L01_REG_FIFO_STAT + 2):
+			tx_buf[buf_idx] = NRF24L01_REG_FEATURE;
+			break;
+
+		default:
+			tx_buf[buf_idx] = xfer_idx;
+		}
+
+		spi_xfer[xfer_idx].tx_buf = &tx_buf[buf_idx];
+		spi_xfer[xfer_idx].rx_buf = &rx_buf[buf_idx];
+		spi_xfer[xfer_idx].cs_change = 1;
+		spi_xfer[xfer_idx].delay_usecs = NRF24L01_SPI_CS_DELAY_US;
+
+		spi_xfer[xfer_idx].len = 2;
+		buf_idx += 2;
+
+		/* 3 address register have size of 5 bytes */
+		if (xfer_idx == NRF24L01_REG_RX_ADDR_P0 ||
+			xfer_idx == NRF24L01_REG_RX_ADDR_P1 ||
+			xfer_idx == NRF24L01_REG_TX_ADDR) {
+
+			spi_xfer[xfer_idx].len = 6;
+			buf_idx += 4;
+		}
+	}
+
+	spi_message_init_with_transfers(&m, spi_xfer, xfer_idx);
+
+	spi_bus_lock(priv->spi_dev->master);
+
+	res = spi_sync_locked(spi, &m);
+	if (res) {
+		PERR(priv->dev, "SPI error %d\n", res);
+		goto out;
+	}
+
+out:
+	spi_bus_unlock(priv->spi_dev->master);
+
+	devm_kfree(priv->dev, spi_xfer);
+	devm_kfree(priv->dev, tx_buf);
+
+	return res;
+}
 
 static int nrf24l01_spi_selftest(struct spi_device *spi)
 {
@@ -160,6 +255,12 @@ int nrf24l01_spi_setup(struct spi_device *spi)
 	PINFO(priv->dev, "\n");
 
 	res = nrf24l01_spi_selftest(spi);
+	if (res)
+		return res;
+
+	res = nrf24l01_spi_read_reg_map(spi);
+	if (res)
+		return res;
 
 	return res;
 }

@@ -52,11 +52,19 @@ static struct device_attribute nrf24l01_attr[] = {
 		.show	= nrf24l01_sysfs_status_show,
 		.store	= nrf24l01_sysfs_status_store,
 	},
+	{
+		.attr = {
+			.name = "reg_map",
+			.mode = 0444
+		},
+		.show	= nrf24l01_sysfs_reg_map_show,
+	},
 };
 
 static struct attribute *nrf24l01_sysfs_entries[] = {
 	&nrf24l01_attr[0].attr,
 	&nrf24l01_attr[1].attr,
+	&nrf24l01_attr[2].attr,
 	NULL
 };
 
