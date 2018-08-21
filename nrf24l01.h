@@ -127,4 +127,5 @@ ssize_t nrf24l01_read(struct file *filp, char __user *ubuff,
 ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 	size_t count, loff_t *offp);
 
+int nrf24l01_spi_read_reg_map(struct spi_device *spi);
 int nrf24l01_spi_setup(struct spi_device *spi);

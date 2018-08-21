@@ -58,9 +58,14 @@ ssize_t nrf24l01_sysfs_status_store(struct device *dev,
 ssize_t nrf24l01_sysfs_reg_map_show(struct device *dev,
 		struct device_attribute *attr, char *buff)
 {
+	int res = 0;
 	struct priv_data *priv = dev_get_drvdata(dev);
 	struct nrf24l01_registers *reg = &priv->spi_ops.reg_map;
 	ssize_t len = 0;
+
+	res = nrf24l01_spi_read_reg_map(priv->spi_dev);
+	if (res)
+		return 0;
 
 	len += sprintf(buff + len, "config: 0x%02x\n", reg->config.value);
 	len += sprintf(buff + len, "en_aa: 0x%02x\n", reg->en_aa.value);

@@ -65,7 +65,7 @@
 /* selftest value which is written to config register */
 #define NRF24L01_SELFTEST_CONFIG	0x7D
 
-static int nrf24l01_spi_read_reg_map(struct spi_device *spi)
+int nrf24l01_spi_read_reg_map(struct spi_device *spi)
 {
 	int res = -EPERM;
 	struct priv_data *priv = spi_get_drvdata(spi);
@@ -255,10 +255,6 @@ int nrf24l01_spi_setup(struct spi_device *spi)
 	PINFO(priv->dev, "\n");
 
 	res = nrf24l01_spi_selftest(spi);
-	if (res)
-		return res;
-
-	res = nrf24l01_spi_read_reg_map(spi);
 	if (res)
 		return res;
 
