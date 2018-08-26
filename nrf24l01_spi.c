@@ -65,6 +65,79 @@
 /* selftest value which is written to config register */
 #define NRF24L01_SELFTEST_CONFIG	0x7D
 
+/* max size for address is 5 bytes */
+#define NRF24L01_MAX_ADDR_LEN		5
+#define NRF24L01_MAX_ADDR_VALUE		0xFFFFFFFFFFULL
+
+struct nrf24l01_reg_write_addr {
+	uint8_t reg;
+	uint8_t value[NRF24L01_MAX_ADDR_LEN];
+};
+
+int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
+		unsigned long long val)
+{
+	int res = -EPERM;
+	struct priv_data *priv = spi_get_drvdata(spi);
+	struct spi_message m;
+	struct nrf24l01_reg_write_addr tx_buf = { 0 };
+	struct nrf24l01_reg_read_addr rx_buf = { 0 };
+	struct spi_transfer spi_xfer = {
+		.tx_buf = &tx_buf,
+		.rx_buf = &rx_buf,
+		.cs_change = 1,
+		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
+	};
+
+	PINFO(priv->dev, "\n");
+
+	if ((reg > NRF24L01_REG_FIFO_STAT && reg < NRF24L01_REG_DYNPD) ||
+		reg > NRF24L01_REG_FEATURE) {
+		PERR(priv->dev, "invalid register\n");
+		return -EINVAL;
+	}
+
+	/* over 1 byte value can be written only to 3 address registers */
+	if (val > 0xFF &&
+		(reg != NRF24L01_REG_RX_ADDR_P0 &&
+		 reg != NRF24L01_REG_RX_ADDR_P1 &&
+		 reg != NRF24L01_REG_TX_ADDR)) {
+		PERR(priv->dev, "value out of range\n");
+		return -EINVAL;
+	}
+
+	if (val > NRF24L01_MAX_ADDR_VALUE) {
+		PERR(priv->dev, "invalid value\n");
+		return -EINVAL;
+	}
+
+	tx_buf.reg = NRF24L01_REG_WRITE_MASK | reg;
+	if (reg == NRF24L01_REG_RX_ADDR_P0 ||
+		reg == NRF24L01_REG_RX_ADDR_P1 ||
+		reg == NRF24L01_REG_TX_ADDR) {
+		memcpy(tx_buf.value, &val, NRF24L01_MAX_ADDR_LEN);
+		spi_xfer.len = sizeof(tx_buf);
+	} else {
+		tx_buf.value[0] = (uint8_t)val;
+		spi_xfer.len = 2;
+	}
+
+	spi_message_init_with_transfers(&m, &spi_xfer, 1);
+
+	spi_bus_lock(priv->spi_dev->master);
+
+	res = spi_sync_locked(spi, &m);
+	if (res) {
+		PERR(priv->dev, "SPI error %d\n", res);
+		goto out;
+	}
+
+out:
+	spi_bus_unlock(priv->spi_dev->master);
+
+	return res;
+}
+
 int nrf24l01_spi_read_reg_map(struct spi_device *spi)
 {
 	int res = -EPERM;
@@ -249,7 +322,7 @@ out:
 
 int nrf24l01_spi_setup(struct spi_device *spi)
 {
-	int res = 0;
+	int res = -EPERM;
 	struct priv_data *priv = spi_get_drvdata(spi);
 
 	PINFO(priv->dev, "\n");

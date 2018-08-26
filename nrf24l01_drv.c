@@ -38,19 +38,10 @@ MODULE_AUTHOR("TERO SALMINEN");
 static struct device_attribute nrf24l01_attr[] = {
 	{
 		.attr = {
-			.name = "config",
-			.mode = 0664
+			.name = "set_reg",
+			.mode = 0220
 		},
-		.show	= nrf24l01_sysfs_config_show,
-		.store	= nrf24l01_sysfs_config_store,
-	},
-	{
-		.attr = {
-			.name = "status",
-			.mode = 0664
-		},
-		.show	= nrf24l01_sysfs_status_show,
-		.store	= nrf24l01_sysfs_status_store,
+		.store	= nrf24l01_sysfs_reg_store,
 	},
 	{
 		.attr = {
@@ -64,7 +55,6 @@ static struct device_attribute nrf24l01_attr[] = {
 static struct attribute *nrf24l01_sysfs_entries[] = {
 	&nrf24l01_attr[0].attr,
 	&nrf24l01_attr[1].attr,
-	&nrf24l01_attr[2].attr,
 	NULL
 };
 

@@ -44,8 +44,7 @@
 #include <linux/spi/spi.h>
 #include <linux/of.h>
 
-#define NRF24L01_SPI_BUFFER		70
-#define NRF24L01_SPI_XFER_BUFFER	26
+#define NRF24L01_MAX_ADDR_LEN		5
 
 /* Status register value is always returned in the first
  * byte of SPI read operation.
@@ -58,7 +57,7 @@ struct nrf24l01_reg_read {
 /* 3 registers contain address length of 5 bytes */
 struct nrf24l01_reg_read_addr {
 	uint8_t status;
-	uint8_t value[5];
+	uint8_t value[NRF24L01_MAX_ADDR_LEN];
 };
 
 /* NRF24L01 registers in ascending order by address */
@@ -110,13 +109,7 @@ struct priv_data {
 	struct nrf24l01_spi_ops spi_ops;
 };
 
-ssize_t nrf24l01_sysfs_config_show(struct device *dev,
-	struct device_attribute *attr, char *buff);
-ssize_t nrf24l01_sysfs_config_store(struct device *dev,
-	struct device_attribute *attr, const char *buff, size_t count);
-ssize_t nrf24l01_sysfs_status_show(struct device *dev,
-	struct device_attribute *attr, char *buff);
-ssize_t nrf24l01_sysfs_status_store(struct device *dev,
+ssize_t nrf24l01_sysfs_reg_store(struct device *dev,
 	struct device_attribute *attr, const char *buff, size_t count);
 ssize_t nrf24l01_sysfs_reg_map_show(struct device *dev,
 	struct device_attribute *attr, char *buff);
@@ -127,5 +120,7 @@ ssize_t nrf24l01_read(struct file *filp, char __user *ubuff,
 ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 	size_t count, loff_t *offp);
 
+int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
+	unsigned long long val);
 int nrf24l01_spi_read_reg_map(struct spi_device *spi);
 int nrf24l01_spi_setup(struct spi_device *spi);
