@@ -124,16 +124,9 @@ int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 
 	spi_message_init_with_transfers(&m, &spi_xfer, 1);
 
-	spi_bus_lock(priv->spi_dev->master);
-
-	res = spi_sync_locked(spi, &m);
-	if (res) {
+	res = spi_sync(spi, &m);
+	if (res)
 		PERR(priv->dev, "SPI error %d\n", res);
-		goto out;
-	}
-
-out:
-	spi_bus_unlock(priv->spi_dev->master);
 
 	return res;
 }
@@ -213,17 +206,11 @@ int nrf24l01_spi_read_reg_map(struct spi_device *spi)
 
 	spi_message_init_with_transfers(&m, spi_xfer, xfer_idx);
 
-	spi_bus_lock(priv->spi_dev->master);
-
-	res = spi_sync_locked(spi, &m);
-	if (res) {
+	res = spi_sync(spi, &m);
+	if (res)
 		PERR(priv->dev, "SPI error %d\n", res);
-		goto out;
-	}
 
 out:
-	spi_bus_unlock(priv->spi_dev->master);
-
 	devm_kfree(priv->dev, spi_xfer);
 	devm_kfree(priv->dev, tx_buf);
 
@@ -252,12 +239,10 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 
 	spi_message_init_with_transfers(&m, &spi_xfer, 1);
 
-	spi_bus_lock(priv->spi_dev->master);
-
-	res = spi_sync_locked(spi, &m);
+	res = spi_sync(spi, &m);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
-		goto out;
+		return res;
 	}
 
 	curr_config = rx_buf.value;
@@ -267,10 +252,10 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 	tx_buf[1] = NRF24L01_SELFTEST_CONFIG;
 
 	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync_locked(spi, &m);
+	res = spi_sync(spi, &m);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
-		goto out;
+		return res;
 	}
 
 	/* And read it back to verify SPI communication */
@@ -278,18 +263,17 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 	rx_buf.value = 0;
 
 	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync_locked(spi, &m);
+	res = spi_sync(spi, &m);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
-		goto out;
+		return res;
 	}
 
 	/* SPI-communication fails. Written and read values do not match */
 	if (rx_buf.value != NRF24L01_SELFTEST_CONFIG) {
 		PERR(priv->dev, "Selftest failed: value 0x%x\n",
 			rx_buf.value);
-		res = -EIO;
-		goto out;
+		return -EIO;
 	}
 
 	/* And finally restore original config value */
@@ -297,25 +281,22 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 	tx_buf[1] = curr_config;
 
 	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync_locked(spi, &m);
+	res = spi_sync(spi, &m);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
-		goto out;
+		return res;
 	}
 
 	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync_locked(spi, &m);
+	res = spi_sync(spi, &m);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
-		goto out;
+		return res;
 	}
 
 	/* Store latest config and status register values */
 	priv->spi_ops.reg_map.config.value = curr_config;
 	priv->spi_ops.reg_map.status.value = rx_buf.status;
-
-out:
-	spi_bus_unlock(priv->spi_dev->master);
 
 	return res;
 }
