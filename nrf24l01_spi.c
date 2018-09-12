@@ -66,24 +66,96 @@
 #define NRF24L01_SELFTEST_CONFIG	0x7D
 
 /* max size for address is 5 bytes */
-#define NRF24L01_MAX_ADDR_LEN		5
 #define NRF24L01_MAX_ADDR_VALUE		0xFFFFFFFFFFULL
 
-struct nrf24l01_reg_write_addr {
-	uint8_t reg;
-	uint8_t value[NRF24L01_MAX_ADDR_LEN];
-};
+#define NRF24L01_WRITE_TX_PAYLOAD	0xA0
+
+/* Clear RX_DR, TX_DS and MAX_RT IRQs from status reg */
+#define NRF24L01_CLEAR_IRQS		0x70
+
+#define NRF24L01_USLEEP_MIN		20
+#define NRF24L01_USLEEP_MAX		40
+#define NRF24L01_SPI_USLEEP()		\
+	do {				\
+		usleep_range(20, 40);	\
+	} while (0)
+
+static irqreturn_t nrf24l01_gpio_irq(int irq, void *driver_data)
+{
+	struct priv_data *priv = driver_data;
+
+	priv->spi_ops.busy = 0;
+
+	wake_up_interruptible(&priv->spi_ops.waitq);
+
+	return IRQ_HANDLED;
+}
+
+static int nrf24l01_spi_clear_irqs(struct spi_device *spi)
+{
+	int res = -EPERM;
+	struct priv_data *priv = spi_get_drvdata(spi);
+	uint8_t tx_buf[2] = {
+		NRF24L01_REG_WRITE_MASK | NRF24L01_REG_STATUS,	/* cmd */
+		NRF24L01_CLEAR_IRQS				/* value */
+	};
+
+	res = spi_write(spi, tx_buf, 2);
+	if (res)
+		PERR(priv->dev, "SPI error %d\n", res);
+
+	return res;
+}
+
+int nrf24l01_spi_send_payload(struct spi_device *spi)
+{
+	int res = -EPERM;
+	struct priv_data *priv = spi_get_drvdata(spi);
+	struct nrf24l01_rxtx_payload *payload =
+		&priv->spi_ops.payload;
+	struct spi_transfer spi_xfer = {
+		.cs_change = 1,
+		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
+	};
+
+	/* IRQ bit might be set if previous sending was interrupted */
+	res = nrf24l01_spi_clear_irqs(spi);
+	if (res)
+		return res;
+
+	priv->spi_ops.busy = 1;
+
+	payload->cmd = NRF24L01_WRITE_TX_PAYLOAD;
+	spi_xfer.tx_buf = &payload->cmd;
+	spi_xfer.rx_buf = &payload->rx_status;
+	spi_xfer.len = 1 + payload->data_len;
+
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
+	if (res) {
+		PERR(priv->dev, "SPI error %d\n", res);
+		return res;
+	}
+
+	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 1);
+	NRF24L01_SPI_USLEEP();
+	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 0);
+
+	res = wait_event_interruptible(priv->spi_ops.waitq, !priv->spi_ops.busy);
+	if (res)
+		PERR(priv->dev, "wait interrupted %d\n", res);
+
+	return res;
+}
 
 int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 		unsigned long long val)
 {
 	int res = -EPERM;
 	struct priv_data *priv = spi_get_drvdata(spi);
-	struct nrf24l01_reg_write_addr tx_buf = { 0 };
-	struct nrf24l01_reg_read_addr rx_buf = { 0 };
+	struct nrf24l01_rxtx_payload *buff = &priv->spi_ops.payload;
 	struct spi_transfer spi_xfer = {
-		.tx_buf = &tx_buf,
-		.rx_buf = &rx_buf,
+		.tx_buf = &buff->cmd,
+		.rx_buf = &buff->rx_status,
 		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
 	};
 
@@ -109,14 +181,14 @@ int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 		return -EINVAL;
 	}
 
-	tx_buf.reg = NRF24L01_REG_WRITE_MASK | reg;
+	buff->cmd = NRF24L01_REG_WRITE_MASK | reg;
 	if (reg == NRF24L01_REG_RX_ADDR_P0 ||
 		reg == NRF24L01_REG_RX_ADDR_P1 ||
 		reg == NRF24L01_REG_TX_ADDR) {
-		memcpy(tx_buf.value, &val, NRF24L01_MAX_ADDR_LEN);
-		spi_xfer.len = sizeof(tx_buf);
+		memcpy(buff->tx, &val, NRF24L01_MAX_ADDR_LEN);
+		spi_xfer.len = 1 + NRF24L01_MAX_ADDR_LEN;
 	} else {
-		tx_buf.value[0] = (uint8_t)val;
+		buff->tx[0] = (uint8_t)val;
 		spi_xfer.len = 2;
 	}
 
@@ -293,9 +365,38 @@ int nrf24l01_spi_setup(struct spi_device *spi)
 
 	PINFO(priv->dev, "\n");
 
+	priv->spi_ops.gpio_ce_rxtx = devm_gpiod_get(&spi->dev, "ce", GPIOD_OUT_LOW);
+	if (IS_ERR(priv->spi_ops.gpio_ce_rxtx)) {
+		res = PTR_ERR(priv->spi_ops.gpio_ce_rxtx);
+		PERR(priv->dev, "gpio ce error %d\n", res);
+		return res;
+	}
+
+	priv->spi_ops.gpio_irq = devm_gpiod_get(&spi->dev, "irq", GPIOD_ASIS);
+	if (IS_ERR(priv->spi_ops.gpio_irq)) {
+		res = PTR_ERR(priv->spi_ops.gpio_irq);
+		PERR(priv->dev, "gpio irq error %d\n", res);
+		return res;
+	}
+
+	res = gpiod_to_irq(priv->spi_ops.gpio_irq);
+	if (res < 0) {
+		PERR(priv->dev, "irq error %d\n", res);
+		return res;
+	}
+
+	res = devm_request_irq(&spi->dev, res, nrf24l01_gpio_irq,
+			IRQF_TRIGGER_FALLING, dev_name(&spi->dev), priv);
+	if (res < 0) {
+		PERR(priv->dev, "irq req error %d\n", res);
+		return res;
+	}
+
 	res = nrf24l01_spi_selftest(spi);
 	if (res)
 		return res;
+
+	res = nrf24l01_spi_clear_irqs(spi);
 
 	return res;
 }

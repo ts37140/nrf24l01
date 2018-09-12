@@ -50,11 +50,19 @@ static struct device_attribute nrf24l01_attr[] = {
 		},
 		.show	= nrf24l01_sysfs_reg_map_show,
 	},
+	{
+		.attr = {
+			.name = "info",
+			.mode = 0444
+		},
+		.show	= nrf24l01_sysfs_info_show,
+	},
 };
 
 static struct attribute *nrf24l01_sysfs_entries[] = {
 	&nrf24l01_attr[0].attr,
 	&nrf24l01_attr[1].attr,
+	&nrf24l01_attr[2].attr,
 	NULL
 };
 
@@ -125,6 +133,8 @@ static int nrf24l01_probe(struct spi_device *spi)
 	}
 
 	PINFO(priv->dev, "\n");
+
+	init_waitqueue_head(&priv->spi_ops.waitq);
 
 	res = nrf24l01_spi_setup(spi);
 	if (res)

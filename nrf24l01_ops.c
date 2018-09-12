@@ -32,14 +32,22 @@
  */
 #define NRF24L01_MAX_REG_INPUT_LEN	18
 
+static DEFINE_MUTEX(dev_mutex);
+
 ssize_t nrf24l01_sysfs_reg_store(struct device *dev,
 		struct device_attribute *attr, const char *buff, size_t count)
 {
-	int res = EPERM;
+	int res = -EPERM;
 	struct priv_data *priv = dev_get_drvdata(dev);
 	unsigned int reg = 0;
 	char *val_str = NULL;
 	unsigned long long val = 0;
+
+	/* No other spi traffic when char dev is opened */
+	if (!mutex_trylock(&dev_mutex)) {
+		PERR(priv->dev, "device busy\n");
+		return -EBUSY;
+	}
 
 	if (count > NRF24L01_MAX_REG_INPUT_LEN) {
 		PERR(priv->dev, "buffer too long\n");
@@ -52,14 +60,15 @@ ssize_t nrf24l01_sysfs_reg_store(struct device *dev,
 	val_str = memchr(buff, ' ', count);
 	if (val_str == NULL) {
 		PERR(priv->dev, "value not found\n");
-		return -EINVAL;
+		res = -EINVAL;
+		goto out;
 	}
 
 	*val_str = 0;
 	res = kstrtouint(buff, 16, &reg);
 	if (res) {
 		PERR(priv->dev, "register error %d\n", res);
-		return -EINVAL;
+		goto out;;
 	}
 
 	/* And rest of string is value */
@@ -68,16 +77,21 @@ ssize_t nrf24l01_sysfs_reg_store(struct device *dev,
 	res = kstrtoull(val_str, 16, &val);
 	if (res) {
 		PERR(priv->dev, "value error %d\n", res);
-		return -EINVAL;
+		goto out;
 	}
 
 	PINFO(priv->dev, "reg:0x%x, val:0x%llx\n", reg, val);
 
 	res = nrf24l01_spi_write_register(priv->spi_dev, reg, val);
 	if (res)
-		return -EINVAL;
+		goto out;
 
-	return count;
+	res = count;
+
+out:
+	mutex_unlock(&dev_mutex);
+
+	return res;
 }
 
 ssize_t nrf24l01_sysfs_reg_map_show(struct device *dev,
@@ -88,9 +102,15 @@ ssize_t nrf24l01_sysfs_reg_map_show(struct device *dev,
 	struct nrf24l01_registers *reg = &priv->spi_ops.reg_map;
 	ssize_t len = 0;
 
+	/* No other spi traffic when char dev is opened */
+	if (!mutex_trylock(&dev_mutex)) {
+		PERR(priv->dev, "device busy\n");
+		return -EBUSY;
+	}
+
 	res = nrf24l01_spi_read_reg_map(priv->spi_dev);
 	if (res)
-		return 0;
+		goto out;
 
 	len += sprintf(buff + len,
 		"config (0x0): 0x%02x\n", reg->config.value);
@@ -154,29 +174,87 @@ ssize_t nrf24l01_sysfs_reg_map_show(struct device *dev,
 	len += sprintf(buff + len,
 		"feature (0x1D): 0x%02x\n", reg->feature.value);
 
-	return len;
+	res = len;
+out:
+	mutex_unlock(&dev_mutex);
+
+	return res;
+}
+
+ssize_t nrf24l01_sysfs_info_show(struct device *dev,
+	struct device_attribute *attr, char *buff)
+{
+	struct priv_data *priv = dev_get_drvdata(dev);
+
+	return sprintf(buff, "byte count: %d\n", priv->byte_count);
 }
 
 int nrf24l01_open(struct inode *inode, struct file *filp)
 {
-	return -EPERM;
+	int res = -EPERM;
+	struct priv_data *priv = filp->private_data;
+
+	priv = container_of(inode->i_cdev, struct priv_data, cdev);
+	filp->private_data = priv;
+
+	PINFO(priv->dev, "\n");
+
+	res = mutex_lock_interruptible(&dev_mutex);
+	if (res)
+		PERR(priv->dev, "mutex interrupted %d\n", res);
+
+	priv->spi_ops.busy = 0;
+	priv->byte_count = 0;
+
+	return res;
 }
 
 int nrf24l01_release(struct inode *inode, struct file *filp)
 {
-	return -EPERM;
+	struct priv_data *priv = filp->private_data;
+
+	PINFO(priv->dev, "\n");
+
+	mutex_unlock(&dev_mutex);
+
+	return 0;
 }
 
 ssize_t nrf24l01_read(struct file *filp, char __user *ubuff,
 		size_t count, loff_t *offp)
 {
-	return -EPERM;
+	ssize_t res = -EPERM;
+
+	return res;
 }
 
 ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 		size_t count, loff_t *offp)
 {
-	return -EPERM;
+	ssize_t res = -EPERM;
+	struct priv_data *priv = filp->private_data;
+
+	if (count > NRF24L01_PAYLOAD_LEN) {
+		count = NRF24L01_PAYLOAD_LEN;
+	}
+
+	res = copy_from_user(priv->spi_ops.payload.tx, ubuff, count);
+	if (res) {
+		PERR(priv->dev, "error copy_from_user %d\n", res);
+		return -EFAULT;
+	}
+
+	priv->spi_ops.payload.data_len = count;
+
+	res = nrf24l01_spi_send_payload(priv->spi_dev);
+	if (res)
+		return res;
+	else {
+		*offp += count;
+		priv->byte_count += count;
+
+		return count;
+	}
 }
 
 

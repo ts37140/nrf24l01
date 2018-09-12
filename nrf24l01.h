@@ -43,8 +43,12 @@
 #include <linux/uaccess.h>
 #include <linux/spi/spi.h>
 #include <linux/of.h>
-
-#define NRF24L01_MAX_ADDR_LEN		5
+#include <linux/gpio/consumer.h>
+#include <linux/interrupt.h>
+#include <linux/delay.h>
+#include <linux/wait.h>
+#include <linux/spinlock.h>
+#include <linux/mutex.h>
 
 /* Status register value is always returned in the first
  * byte of SPI read operation.
@@ -55,6 +59,7 @@ struct nrf24l01_reg_read {
 };
 
 /* 3 registers contain address length of 5 bytes */
+#define NRF24L01_MAX_ADDR_LEN		5
 struct nrf24l01_reg_read_addr {
 	uint8_t status;
 	uint8_t value[NRF24L01_MAX_ADDR_LEN];
@@ -90,28 +95,48 @@ struct nrf24l01_registers {
 	struct nrf24l01_reg_read	feature;
 };
 
-struct nrf24l01_spi_ops {
+/* rx/tx payload spi transfer buffers */
+#define NRF24L01_PAYLOAD_LEN		32
+struct nrf24l01_rxtx_payload {
+	uint8_t data_len;
+	uint8_t cmd;				/* tx_buf[0] */
+	uint8_t tx[NRF24L01_PAYLOAD_LEN];	/* tx_buf[1..31] */
+	uint8_t rx_status;			/* rx_buf[0] */
+	uint8_t rx[NRF24L01_PAYLOAD_LEN];	/* rx_buf[1..31] */
+};
 
-	struct nrf24l01_registers reg_map;
+struct nrf24l01_spi_ops {
+	struct nrf24l01_registers	reg_map;
+	struct gpio_desc 		*gpio_ce_rxtx;
+	struct gpio_desc 		*gpio_irq;
+
+	wait_queue_head_t 		waitq;
+	volatile uint8_t		busy;
+
+	struct nrf24l01_rxtx_payload 	payload;
 };
 
 struct priv_data {
-	dev_t dev_num;
+	dev_t 			dev_num;
 
-	struct cdev cdev;
+	struct cdev 		cdev;
 
-	struct device *dev;
+	struct device 		*dev;
 
-	struct spi_device *spi_dev;
+	struct spi_device 	*spi_dev;
 
-	struct class *nrf24l01_class;
+	struct class 		*nrf24l01_class;
 
-	struct nrf24l01_spi_ops spi_ops;
+	struct nrf24l01_spi_ops	spi_ops;
+
+	uint32_t		byte_count;
 };
 
 ssize_t nrf24l01_sysfs_reg_store(struct device *dev,
 	struct device_attribute *attr, const char *buff, size_t count);
 ssize_t nrf24l01_sysfs_reg_map_show(struct device *dev,
+	struct device_attribute *attr, char *buff);
+ssize_t nrf24l01_sysfs_info_show(struct device *dev,
 	struct device_attribute *attr, char *buff);
 int nrf24l01_open(struct inode *inode, struct file *filp);
 int nrf24l01_release(struct inode *inode, struct file *filp);
@@ -120,6 +145,7 @@ ssize_t nrf24l01_read(struct file *filp, char __user *ubuff,
 ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 	size_t count, loff_t *offp);
 
+int nrf24l01_spi_send_payload(struct spi_device *spi);
 int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 	unsigned long long val);
 int nrf24l01_spi_read_reg_map(struct spi_device *spi);
