@@ -79,13 +79,11 @@ int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 {
 	int res = -EPERM;
 	struct priv_data *priv = spi_get_drvdata(spi);
-	struct spi_message m;
 	struct nrf24l01_reg_write_addr tx_buf = { 0 };
 	struct nrf24l01_reg_read_addr rx_buf = { 0 };
 	struct spi_transfer spi_xfer = {
 		.tx_buf = &tx_buf,
 		.rx_buf = &rx_buf,
-		.cs_change = 1,
 		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
 	};
 
@@ -122,9 +120,7 @@ int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 		spi_xfer.len = 2;
 	}
 
-	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-
-	res = spi_sync(spi, &m);
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
 	if (res)
 		PERR(priv->dev, "SPI error %d\n", res);
 
@@ -138,7 +134,6 @@ int nrf24l01_spi_read_reg_map(struct spi_device *spi)
 	uint8_t *tx_buf = NULL;
 	uint8_t *rx_buf = NULL;
 	struct spi_transfer *spi_xfer = NULL;
-	struct spi_message m;
 	unsigned int xfer_idx = 0;
 	unsigned int buf_idx = 0;
 
@@ -204,9 +199,7 @@ int nrf24l01_spi_read_reg_map(struct spi_device *spi)
 		}
 	}
 
-	spi_message_init_with_transfers(&m, spi_xfer, xfer_idx);
-
-	res = spi_sync(spi, &m);
+	res = spi_sync_transfer(spi, spi_xfer, xfer_idx);
 	if (res)
 		PERR(priv->dev, "SPI error %d\n", res);
 
@@ -221,7 +214,6 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 {
 	int res = -EPERM;
 	struct priv_data *priv = spi_get_drvdata(spi);
-	struct spi_message m;
 	uint8_t tx_buf[2] = { 0 };
 	struct nrf24l01_reg_read rx_buf = { 0 };
 	uint8_t curr_config = 0;
@@ -230,16 +222,13 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 		.tx_buf = tx_buf,
 		.rx_buf = &rx_buf,
 		.len = 2,
-		.cs_change = 1,
 		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
 	};
 
 	/* Save current config reg value */
 	tx_buf[0] = NRF24L01_REG_CONFIG;
 
-	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-
-	res = spi_sync(spi, &m);
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
 		return res;
@@ -251,8 +240,7 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 	tx_buf[0] = NRF24L01_REG_WRITE_MASK | NRF24L01_REG_CONFIG;
 	tx_buf[1] = NRF24L01_SELFTEST_CONFIG;
 
-	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync(spi, &m);
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
 		return res;
@@ -262,8 +250,7 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 	tx_buf[0] = NRF24L01_REG_CONFIG;
 	rx_buf.value = 0;
 
-	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync(spi, &m);
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
 		return res;
@@ -280,15 +267,13 @@ static int nrf24l01_spi_selftest(struct spi_device *spi)
 	tx_buf[0] = NRF24L01_REG_WRITE_MASK | NRF24L01_REG_CONFIG;
 	tx_buf[1] = curr_config;
 
-	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync(spi, &m);
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
 		return res;
 	}
 
-	spi_message_init_with_transfers(&m, &spi_xfer, 1);
-	res = spi_sync(spi, &m);
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
 	if (res) {
 		PERR(priv->dev, "SPI error %d\n", res);
 		return res;
