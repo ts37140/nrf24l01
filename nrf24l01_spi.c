@@ -317,6 +317,31 @@ out:
 	return res;
 }
 
+int nrf24l01_spi_refresh_primrx_status(struct spi_device *spi)
+{
+	int res = -EPERM;
+	struct priv_data *priv = spi_get_drvdata(spi);
+	uint8_t tx_buf[2] = {
+		NRF24L01_REG_CONFIG,	/* cmd */
+		0			/* value */
+	};
+	struct nrf24l01_reg_read rx_buf = { 0 };
+	struct spi_transfer spi_xfer = {
+		.tx_buf = tx_buf,
+		.rx_buf = &rx_buf,
+		.len = 2,
+		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
+	};
+
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
+	if (res)
+		return res;
+
+	priv->spi_ops.prim_rx = rx_buf.value & NRF24L01_CONFIG_PRIM_RX_MASK;
+
+	return res;
+}
+
 int nrf24l01_spi_refresh_payload_size(struct spi_device *spi)
 {
 	int res = -EPERM;

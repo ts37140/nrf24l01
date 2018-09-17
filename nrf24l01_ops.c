@@ -174,8 +174,14 @@ ssize_t nrf24l01_sysfs_info_show(struct device *dev,
 	struct device_attribute *attr, char *buff)
 {
 	struct priv_data *priv = dev_get_drvdata(dev);
+	ssize_t len = 0;
 
-	return sprintf(buff, "byte count: %d\n", priv->byte_count);
+	len += sprintf(buff + len,
+		"byte count: %d\n", priv->byte_count);
+	len += sprintf(buff + len,
+		"prim_rx: %d\n", priv->spi_ops.prim_rx);
+
+	return len;
 }
 
 int nrf24l01_open(struct inode *inode, struct file *filp)
@@ -195,6 +201,14 @@ int nrf24l01_open(struct inode *inode, struct file *filp)
 	PINFO(priv->dev, "mutex acquired\n");
 
 	res = nrf24l01_spi_refresh_payload_size(priv->spi_dev);
+	if (res)
+		goto err;
+
+	/* Write and read functions perform dummy check the device is not
+	 * used for reading in tx mode and writing in rx mode. The mode
+	 * is configured with prim_rx parameter in config reg.
+	 */
+	res = nrf24l01_spi_refresh_primrx_status(priv->spi_dev);
 	if (res)
 		goto err;
 
@@ -219,6 +233,11 @@ ssize_t nrf24l01_read(struct file *filp, char __user *ubuff,
 {
 	ssize_t res = -EPERM;
 	struct priv_data *priv = filp->private_data;
+
+	if (priv->spi_ops.prim_rx == NRF24L01_CONFIG_PTX) {
+		PERR(priv->dev, "chip in TX mode\n");
+		return -EIO;
+	}
 
 	if (count < NRF24L01_PAYLOAD_LEN) {
 		PERR(priv->dev, "input buffer too small: %d\n", count);
@@ -252,6 +271,11 @@ ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 {
 	ssize_t res = -EPERM;
 	struct priv_data *priv = filp->private_data;
+
+	if (priv->spi_ops.prim_rx == NRF24L01_CONFIG_PRX) {
+		PERR(priv->dev, "chip in RX mode\n");
+		return -EIO;
+	}
 
 	if (count > NRF24L01_PAYLOAD_LEN) {
 		count = NRF24L01_PAYLOAD_LEN;

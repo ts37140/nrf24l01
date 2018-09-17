@@ -94,6 +94,9 @@ struct nrf24l01_rxtx_payload {
 	uint8_t rx[NRF24L01_PAYLOAD_LEN];	/* rx_buf[1..31] */
 };
 
+#define NRF24L01_CONFIG_PTX		0 /* tx mode */
+#define NRF24L01_CONFIG_PRX		1 /* rx mode */
+
 struct nrf24l01_spi_ops {
 	struct nrf24l01_registers	reg_map;
 	struct gpio_desc 		*gpio_ce_rxtx;
@@ -106,6 +109,9 @@ struct nrf24l01_spi_ops {
 	/* config reg: payload size */
 	uint8_t				payload_size;
 	struct nrf24l01_rxtx_payload 	payload;
+
+	/* config reg: rx/tx mode */
+	uint8_t				prim_rx;
 };
 
 struct priv_data {
@@ -143,4 +149,5 @@ int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 	unsigned long long val);
 int nrf24l01_spi_read_reg_map(struct spi_device *spi);
 int nrf24l01_spi_refresh_payload_size(struct spi_device *spi);
+int nrf24l01_spi_refresh_primrx_status(struct spi_device *spi);
 int nrf24l01_spi_setup(struct spi_device *spi);
