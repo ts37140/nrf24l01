@@ -1,17 +1,17 @@
 /*
  * Copyright (c) 2018, Tero Salminen
  * All rights reserved.
- *  
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  */
 
 #define PINFO(_dev, fmt, args...) \
@@ -99,31 +99,31 @@ struct nrf24l01_rxtx_payload {
 
 struct nrf24l01_spi_ops {
 	struct nrf24l01_registers	reg_map;
-	struct gpio_desc 		*gpio_ce_rxtx;
-	struct gpio_desc 		*gpio_irq;
+	struct gpio_desc		*gpio_ce_rxtx;
+	struct gpio_desc		*gpio_irq;
 
-	wait_queue_head_t 		waitq;
+	wait_queue_head_t		waitq;
 
-	volatile uint8_t		rf_done;
+	uint8_t				rf_done;
 
 	/* config reg: payload size */
 	uint8_t				payload_size;
-	struct nrf24l01_rxtx_payload 	payload;
+	struct nrf24l01_rxtx_payload	payload;
 
 	/* config reg: rx/tx mode */
 	uint8_t				prim_rx;
 };
 
 struct priv_data {
-	dev_t 			dev_num;
+	dev_t			dev_num;
 
-	struct cdev 		cdev;
+	struct cdev		cdev;
 
-	struct device 		*dev;
+	struct device		*dev;
 
-	struct spi_device 	*spi_dev;
+	struct spi_device	*spi_dev;
 
-	struct class 		*nrf24l01_class;
+	struct class		*nrf24l01_class;
 
 	struct nrf24l01_spi_ops	spi_ops;
 

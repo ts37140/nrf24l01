@@ -1,17 +1,17 @@
 /*
  * Copyright (c) 2018, Tero Salminen
  * All rights reserved.
- *  
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  */
 
 #include "nrf24l01.h"
@@ -68,10 +68,6 @@
 
 #define NRF24L01_USLEEP_MIN		20
 #define NRF24L01_USLEEP_MAX		40
-#define NRF24L01_SPI_USLEEP()		\
-	do {				\
-		usleep_range(20, 40);	\
-	} while (0)
 
 static irqreturn_t nrf24l01_gpio_irq(int irq, void *driver_data)
 {
@@ -130,10 +126,13 @@ int nrf24l01_spi_send_payload(struct spi_device *spi)
 	}
 
 	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 1);
-	NRF24L01_SPI_USLEEP();
+
+	usleep_range(NRF24L01_USLEEP_MIN, NRF24L01_USLEEP_MAX);
+
 	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 0);
 
-	res = wait_event_interruptible(priv->spi_ops.waitq, priv->spi_ops.rf_done);
+	res = wait_event_interruptible(priv->spi_ops.waitq,
+			priv->spi_ops.rf_done);
 	if (res)
 		PERR(priv->dev, "wait interrupted %d\n", res);
 
@@ -163,7 +162,8 @@ int nrf24l01_spi_receive_payload(struct spi_device *spi)
 	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 1);
 
 	/* Block till message received */
-	res = wait_event_interruptible(priv->spi_ops.waitq, priv->spi_ops.rf_done);
+	res = wait_event_interruptible(priv->spi_ops.waitq,
+			priv->spi_ops.rf_done);
 	if (res) {
 		PERR(priv->dev, "wait interrupted %d\n", res);
 		gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 0);
@@ -178,10 +178,8 @@ int nrf24l01_spi_receive_payload(struct spi_device *spi)
 	payload->data_len = priv->spi_ops.payload_size;
 
 	res = spi_sync_transfer(spi, &spi_xfer, 1);
-	if (res) {
+	if (res)
 		PERR(priv->dev, "SPI error %d\n", res);
-		return res;;
-	}
 
 	return res;
 }
@@ -458,7 +456,8 @@ int nrf24l01_spi_setup(struct spi_device *spi)
 
 	PINFO(priv->dev, "\n");
 
-	priv->spi_ops.gpio_ce_rxtx = devm_gpiod_get(&spi->dev, "ce", GPIOD_OUT_LOW);
+	priv->spi_ops.gpio_ce_rxtx =
+			devm_gpiod_get(&spi->dev, "ce", GPIOD_OUT_LOW);
 	if (IS_ERR(priv->spi_ops.gpio_ce_rxtx)) {
 		res = PTR_ERR(priv->spi_ops.gpio_ce_rxtx);
 		PERR(priv->dev, "gpio ce error %d\n", res);

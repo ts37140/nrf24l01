@@ -1,17 +1,17 @@
 /*
  * Copyright (c) 2018, Tero Salminen
  * All rights reserved.
- *  
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  */
 
 #include "nrf24l01.h"
@@ -57,7 +57,7 @@ ssize_t nrf24l01_sysfs_reg_store(struct device *dev,
 	res = kstrtouint(buff, 16, &reg);
 	if (res) {
 		PERR(priv->dev, "register error %d\n", res);
-		goto out;;
+		goto out;
 	}
 
 	/* And rest of string is value */
@@ -277,9 +277,8 @@ ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 		return -EIO;
 	}
 
-	if (count > NRF24L01_PAYLOAD_LEN) {
+	if (count > NRF24L01_PAYLOAD_LEN)
 		count = NRF24L01_PAYLOAD_LEN;
-	}
 
 	res = copy_from_user(priv->spi_ops.payload.tx, ubuff, count);
 	if (res) {
@@ -292,12 +291,11 @@ ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 	res = nrf24l01_spi_send_payload(priv->spi_dev);
 	if (res)
 		return res;
-	else {
-		*offp += count;
-		priv->byte_count += count;
 
-		return count;
-	}
+	*offp += count;
+	priv->byte_count += count;
+
+	return count;
 }
 
 
