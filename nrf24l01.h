@@ -90,7 +90,7 @@ struct nrf24l01_rxtx_payload {
 	uint8_t data_len;
 	uint8_t cmd;				/* tx_buf[0] */
 	uint8_t tx[NRF24L01_PAYLOAD_LEN];	/* tx_buf[1..31] */
-	uint8_t rx_status;			/* rx_buf[0] */
+	uint8_t status_reg;			/* rx_buf[0] */
 	uint8_t rx[NRF24L01_PAYLOAD_LEN];	/* rx_buf[1..31] */
 };
 
@@ -100,8 +100,11 @@ struct nrf24l01_spi_ops {
 	struct gpio_desc 		*gpio_irq;
 
 	wait_queue_head_t 		waitq;
-	volatile uint8_t		busy;
 
+	volatile uint8_t		rf_done;
+
+	/* config reg: payload size */
+	uint8_t				payload_size;
 	struct nrf24l01_rxtx_payload 	payload;
 };
 
@@ -135,7 +138,9 @@ ssize_t nrf24l01_write(struct file *filp, const char __user *ubuff,
 	size_t count, loff_t *offp);
 
 int nrf24l01_spi_send_payload(struct spi_device *spi);
+int nrf24l01_spi_receive_payload(struct spi_device *spi);
 int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 	unsigned long long val);
 int nrf24l01_spi_read_reg_map(struct spi_device *spi);
+int nrf24l01_spi_refresh_payload_size(struct spi_device *spi);
 int nrf24l01_spi_setup(struct spi_device *spi);

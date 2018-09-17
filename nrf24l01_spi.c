@@ -51,16 +51,20 @@
 #define NRF24L01_REG_DYNPD		0x1C
 #define NRF24L01_REG_FEATURE		0x1D
 
+/* spi commands */
+#define NRF24L01_READ_RX_PAYLOAD	0x61
+#define NRF24L01_WRITE_TX_PAYLOAD	0xA0
+
 /* selftest value which is written to config register */
 #define NRF24L01_SELFTEST_CONFIG	0x7D
 
 /* max size for address is 5 bytes */
 #define NRF24L01_MAX_ADDR_VALUE		0xFFFFFFFFFFULL
 
-#define NRF24L01_WRITE_TX_PAYLOAD	0xA0
-
 /* Clear RX_DR, TX_DS and MAX_RT IRQs from status reg */
-#define NRF24L01_CLEAR_IRQS		0x70
+#define NRF24L01_STATUS_CLEAR_IRQS	0x70
+
+#define NRF24L01_CONFIG_PRIM_RX_MASK	0x1
 
 #define NRF24L01_USLEEP_MIN		20
 #define NRF24L01_USLEEP_MAX		40
@@ -73,7 +77,7 @@ static irqreturn_t nrf24l01_gpio_irq(int irq, void *driver_data)
 {
 	struct priv_data *priv = driver_data;
 
-	priv->spi_ops.busy = 0;
+	priv->spi_ops.rf_done = 1;
 
 	wake_up_interruptible(&priv->spi_ops.waitq);
 
@@ -86,7 +90,7 @@ static int nrf24l01_spi_clear_irqs(struct spi_device *spi)
 	struct priv_data *priv = spi_get_drvdata(spi);
 	uint8_t tx_buf[2] = {
 		NRF24L01_REG_WRITE_MASK | NRF24L01_REG_STATUS,	/* cmd */
-		NRF24L01_CLEAR_IRQS				/* value */
+		NRF24L01_STATUS_CLEAR_IRQS			/* value */
 	};
 
 	res = spi_write(spi, tx_buf, 2);
@@ -107,16 +111,16 @@ int nrf24l01_spi_send_payload(struct spi_device *spi)
 		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
 	};
 
-	/* IRQ bit might be set if previous sending was interrupted */
+	/* Chip has IRQ bit set after previous RX/TX operation */
 	res = nrf24l01_spi_clear_irqs(spi);
 	if (res)
 		return res;
 
-	priv->spi_ops.busy = 1;
+	priv->spi_ops.rf_done = 0;
 
 	payload->cmd = NRF24L01_WRITE_TX_PAYLOAD;
 	spi_xfer.tx_buf = &payload->cmd;
-	spi_xfer.rx_buf = &payload->rx_status;
+	spi_xfer.rx_buf = &payload->status_reg;
 	spi_xfer.len = 1 + payload->data_len;
 
 	res = spi_sync_transfer(spi, &spi_xfer, 1);
@@ -129,9 +133,55 @@ int nrf24l01_spi_send_payload(struct spi_device *spi)
 	NRF24L01_SPI_USLEEP();
 	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 0);
 
-	res = wait_event_interruptible(priv->spi_ops.waitq, !priv->spi_ops.busy);
+	res = wait_event_interruptible(priv->spi_ops.waitq, priv->spi_ops.rf_done);
 	if (res)
 		PERR(priv->dev, "wait interrupted %d\n", res);
+
+	return res;
+}
+
+int nrf24l01_spi_receive_payload(struct spi_device *spi)
+{
+	int res = -EPERM;
+	struct priv_data *priv = spi_get_drvdata(spi);
+	struct nrf24l01_rxtx_payload *payload =
+		&priv->spi_ops.payload;
+	struct spi_transfer spi_xfer = {
+		.tx_buf = &payload->cmd,
+		.rx_buf = &payload->status_reg,
+		.len = 1 + priv->spi_ops.payload_size,
+		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
+	};
+
+	/* Chip has IRQ bit set after previous RX/TX operation */
+	res = nrf24l01_spi_clear_irqs(spi);
+	if (res)
+		return res;
+
+	priv->spi_ops.rf_done = 0;
+
+	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 1);
+
+	/* Block till message received */
+	res = wait_event_interruptible(priv->spi_ops.waitq, priv->spi_ops.rf_done);
+	if (res) {
+		PERR(priv->dev, "wait interrupted %d\n", res);
+		gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 0);
+		return res;
+	}
+
+	gpiod_set_value(priv->spi_ops.gpio_ce_rxtx, 0);
+
+	memset(payload, 0, sizeof(struct nrf24l01_rxtx_payload));
+
+	payload->cmd = NRF24L01_READ_RX_PAYLOAD;
+	payload->data_len = priv->spi_ops.payload_size;
+
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
+	if (res) {
+		PERR(priv->dev, "SPI error %d\n", res);
+		return res;;
+	}
 
 	return res;
 }
@@ -144,11 +194,9 @@ int nrf24l01_spi_write_register(struct spi_device *spi, unsigned int reg,
 	struct nrf24l01_rxtx_payload *buff = &priv->spi_ops.payload;
 	struct spi_transfer spi_xfer = {
 		.tx_buf = &buff->cmd,
-		.rx_buf = &buff->rx_status,
+		.rx_buf = &buff->status_reg,
 		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
 	};
-
-	PINFO(priv->dev, "\n");
 
 	if ((reg > NRF24L01_REG_FIFO_STAT && reg < NRF24L01_REG_DYNPD) ||
 		reg > NRF24L01_REG_FEATURE) {
@@ -197,8 +245,6 @@ int nrf24l01_spi_read_reg_map(struct spi_device *spi)
 	struct spi_transfer *spi_xfer = NULL;
 	unsigned int xfer_idx = 0;
 	unsigned int buf_idx = 0;
-
-	PINFO(priv->dev, "\n");
 
 	spi_xfer = devm_kzalloc(priv->dev,
 		NRF24L01_REG_NUM * sizeof(struct spi_transfer), GFP_KERNEL);
@@ -267,6 +313,39 @@ int nrf24l01_spi_read_reg_map(struct spi_device *spi)
 out:
 	devm_kfree(priv->dev, spi_xfer);
 	devm_kfree(priv->dev, tx_buf);
+
+	return res;
+}
+
+int nrf24l01_spi_refresh_payload_size(struct spi_device *spi)
+{
+	int res = -EPERM;
+	struct priv_data *priv = spi_get_drvdata(spi);
+	uint8_t tx_buf[2] = {
+		NRF24L01_REG_RX_PW_P0,	/* cmd */
+		0			/* value */
+	};
+	struct nrf24l01_reg_read rx_buf = { 0 };
+	struct spi_transfer spi_xfer = {
+		.tx_buf = tx_buf,
+		.rx_buf = &rx_buf,
+		.len = 2,
+		.delay_usecs = NRF24L01_SPI_CS_DELAY_US
+	};
+
+	res = spi_sync_transfer(spi, &spi_xfer, 1);
+	if (res)
+		return res;
+
+	if (rx_buf.value > NRF24L01_PAYLOAD_LEN) {
+		PERR(priv->dev, "invalid payload size %d\n",
+				priv->spi_ops.payload_size);
+		return -EIO;
+	}
+
+	priv->spi_ops.payload_size = rx_buf.value;
+
+	PINFO(priv->dev, "payload size %d\n", priv->spi_ops.payload_size);
 
 	return res;
 }

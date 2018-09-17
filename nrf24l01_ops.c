@@ -186,24 +186,29 @@ int nrf24l01_open(struct inode *inode, struct file *filp)
 	priv = container_of(inode->i_cdev, struct priv_data, cdev);
 	filp->private_data = priv;
 
-	PINFO(priv->dev, "\n");
-
 	res = mutex_lock_interruptible(&dev_mutex);
-	if (res)
+	if (res) {
 		PERR(priv->dev, "mutex interrupted %d\n", res);
+		return res;
+	}
 
-	priv->spi_ops.busy = 0;
+	PINFO(priv->dev, "mutex acquired\n");
+
+	res = nrf24l01_spi_refresh_payload_size(priv->spi_dev);
+	if (res)
+		goto err;
+
 	priv->byte_count = 0;
 
+	return res;
+
+err:
+	mutex_unlock(&dev_mutex);
 	return res;
 }
 
 int nrf24l01_release(struct inode *inode, struct file *filp)
 {
-	struct priv_data *priv = filp->private_data;
-
-	PINFO(priv->dev, "\n");
-
 	mutex_unlock(&dev_mutex);
 
 	return 0;
@@ -213,6 +218,31 @@ ssize_t nrf24l01_read(struct file *filp, char __user *ubuff,
 		size_t count, loff_t *offp)
 {
 	ssize_t res = -EPERM;
+	struct priv_data *priv = filp->private_data;
+
+	if (count < NRF24L01_PAYLOAD_LEN) {
+		PERR(priv->dev, "input buffer too small: %d\n", count);
+		return -ENOMEM;
+	}
+
+	res = nrf24l01_spi_receive_payload(priv->spi_dev);
+	if (res)
+		return res;
+
+	res = copy_to_user(ubuff, priv->spi_ops.payload.rx,
+			priv->spi_ops.payload_size);
+	if (res) {
+		PERR(priv->dev, "error copy_to_user %d\n", res);
+		return -EFAULT;
+	}
+
+	res = priv->spi_ops.payload_size;
+
+	/* offp is not updated. The whole "file" is always
+	 * returned to userspace.
+	 */
+
+	priv->byte_count += res;
 
 	return res;
 }
